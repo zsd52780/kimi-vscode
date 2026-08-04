@@ -1,0 +1,140 @@
+{
+  "name": "kimi-k3-assistant",
+  "displayName": "Kimi K3 助手",
+  "description": "在 VS Code 中通过官方 API 使用 Kimi K3：聊天、解释/重构/审查代码、生成测试，支持流式输出、思考过程和图片输入。",
+  "version": "0.1.0",
+  "publisher": "kimi-k3-assistant",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "kimiK3.openChat",
+        "title": "Kimi K3: 打开聊天面板"
+      },
+      {
+        "command": "kimiK3.explainSelection",
+        "title": "Kimi K3: 解释选中代码"
+      },
+      {
+        "command": "kimiK3.reviewSelection",
+        "title": "Kimi K3: 审查选中代码"
+      },
+      {
+        "command": "kimiK3.refactorSelection",
+        "title": "Kimi K3: 重构选中代码"
+      },
+      {
+        "command": "kimiK3.generateTests",
+        "title": "Kimi K3: 为选中代码生成测试"
+      },
+      {
+        "command": "kimiK3.askAboutFile",
+        "title": "Kimi K3: 询问当前文件"
+      },
+      {
+        "command": "kimiK3.setApiKey",
+        "title": "Kimi K3: 设置 API Key"
+      },
+      {
+        "command": "kimiK3.clearConversation",
+        "title": "Kimi K3: 清空当前对话"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "kimiK3.explainSelection",
+          "when": "editorHasSelection",
+          "group": "kimiK3@1"
+        },
+        {
+          "command": "kimiK3.reviewSelection",
+          "when": "editorHasSelection",
+          "group": "kimiK3@2"
+        },
+        {
+          "command": "kimiK3.refactorSelection",
+          "when": "editorHasSelection",
+          "group": "kimiK3@3"
+        },
+        {
+          "command": "kimiK3.generateTests",
+          "when": "editorHasSelection",
+          "group": "kimiK3@4"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "kimiK3.askAboutFile",
+          "when": "resourceLangId != ''",
+          "group": "kimiK3@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Kimi K3",
+      "properties": {
+        "kimiK3.baseUrl": {
+          "type": "string",
+          "default": "https://api.moonshot.cn/v1",
+          "description": "Kimi API 基础地址（OpenAI 兼容格式），一般无需修改。"
+        },
+        "kimiK3.model": {
+          "type": "string",
+          "default": "kimi-k3",
+          "enum": [
+            "kimi-k3",
+            "kimi-k2.7-code",
+            "kimi-k2.7-code-highspeed",
+            "kimi-k2.6"
+          ],
+          "description": "默认使用的模型，聊天面板内也可以临时切换。"
+        },
+        "kimiK3.reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "low",
+            "high",
+            "max"
+          ],
+          "default": "max",
+          "description": "Kimi K3 的推理强度（该模型始终开启思考模式）。"
+        },
+        "kimiK3.maxTokens": {
+          "type": "number",
+          "default": 8192,
+          "minimum": 1,
+          "maximum": 1048576,
+          "description": "单次回复的最大输出 token 数（K3 上限为 1048576）。"
+        },
+        "kimiK3.systemPrompt": {
+          "type": "string",
+          "default": "你是 Kimi K3，一个集成在 VS Code 中的编程助手。请用中文回答（除非用户使用其他语言），回答代码问题时给出可直接运行的完整示例，并尽量简洁、准确。",
+          "description": "发送给模型的系统提示词。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.4.5"
+  }
+}
