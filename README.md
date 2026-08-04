@@ -1,6 +1,7 @@
 # Kimi 助手（VS Code 插件）
 
-下载地址：[release]()
+下载地址：[release](https://github.com/zsd52780/kimi-vscode/releases/tag/v0.1)
+
 在 VS Code 中通过官方 API 使用 [Kimi](https://platform.kimi.com/docs/) 模型。支持多轮聊天、流式输出、思考过程展示、代码上下文操作和图片输入。
 
 ## 功能
