@@ -1,1 +1,1 @@
-# kimi-for-vscode
+# kimi for vscode
