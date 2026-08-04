@@ -1,6 +1,6 @@
 # Kimi 助手（VS Code 插件）
 
-在 VS Code 中通过官方 API 使用 [Kimi K3](https://platform.kimi.com/docs/guide/kimi-k3-quickstart) 模型。支持多轮聊天、流式输出、思考过程展示、代码上下文操作和图片输入。
+在 VS Code 中通过官方 API 使用 [Kimi](https://platform.kimi.com/docs/guide/) 模型。支持多轮聊天、流式输出、思考过程展示、代码上下文操作和图片输入。
 
 ## 功能
 
@@ -79,4 +79,5 @@ src/
 
 ## 说明
 
+这个项目全部由ai编写
 本项目仅作为 Kimi 官方 API 的客户端，所有请求直接发送到 `https://api.moonshot.cn/v1`，不经过任何中转服务器。API Key 仅保存在本机 VS Code 安全存储中。
