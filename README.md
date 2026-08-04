@@ -79,5 +79,6 @@ src/
 
 ## 说明
 
-这个项目全部由ai编写
+这个项目全部由ai编写,注意安全！
+
 本项目仅作为 Kimi 官方 API 的客户端，所有请求直接发送到 `https://api.moonshot.cn/v1`，不经过任何中转服务器。API Key 仅保存在本机 VS Code 安全存储中。
