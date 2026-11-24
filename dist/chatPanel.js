@@ -37,23 +37,35 @@ exports.ChatPanel = void 0;
 const crypto = __importStar(require("crypto"));
 const vscode = __importStar(require("vscode"));
 const kimiClient_1 = require("./kimiClient");
+const models_1 = require("./models");
 const DEFAULT_BASE_URL = 'https://api.moonshot.cn/v1';
-const DEFAULT_MODEL = 'kimi-k3';
 class ChatPanel {
     context;
     static current;
     panel;
     abortController;
     busy = false;
+    webviewReady = false;
+    pendingConversation;
     constructor(context) {
         this.context = context;
-        this.panel = vscode.window.createWebviewPanel('kimiK3.chat', 'Kimi K3', vscode.ViewColumn.Beside, {
+        this.panel = vscode.window.createWebviewPanel('kimiK3.chat', 'Kimi 助手', vscode.ViewColumn.Beside, {
             enableScripts: true,
             retainContextWhenHidden: true,
         });
         this.panel.webview.html = this.getHtml();
+        const configurationListener = vscode.workspace.onDidChangeConfiguration((event) => {
+            const cfg = vscode.workspace.getConfiguration('kimiK3');
+            if (event.affectsConfiguration('kimiK3.model')) {
+                this.post({ type: 'config', model: cfg.get('model') || models_1.DEFAULT_MODEL });
+            }
+            if (event.affectsConfiguration('kimiK3.reasoningEffort')) {
+                this.post({ type: 'config', effort: (0, models_1.normalizeReasoningEffort)(cfg.get('reasoningEffort')) });
+            }
+        });
         this.panel.onDidDispose(() => {
             this.abortController?.abort();
+            configurationListener.dispose();
             if (ChatPanel.current === this) {
                 ChatPanel.current = undefined;
             }
@@ -74,6 +86,10 @@ class ChatPanel {
         this.panel.reveal(vscode.ViewColumn.Beside, true);
     }
     startConversation(messages) {
+        if (!this.webviewReady) {
+            this.pendingConversation = messages;
+            return;
+        }
         this.post({ type: 'start', messages, replace: true });
     }
     clearConversation() {
@@ -85,6 +101,15 @@ class ChatPanel {
     async handleMessage(message) {
         const msg = message;
         switch (msg.type) {
+            case 'ready': {
+                this.webviewReady = true;
+                if (this.pendingConversation) {
+                    const messages = this.pendingConversation;
+                    this.pendingConversation = undefined;
+                    this.startConversation(messages);
+                }
+                break;
+            }
             case 'send': {
                 if (this.busy || !Array.isArray(msg.messages) || msg.messages.length === 0) {
                     return;
@@ -113,22 +138,21 @@ class ChatPanel {
         if (!apiKey) {
             this.post({
                 type: 'error',
-                message: '还没有配置 API Key。请点击聊天面板右上角的“🔑”按钮，或运行命令“Kimi K3: 设置 API Key”。',
+                message: '还没有配置 API Key。请点击聊天面板右上角的“🔑”按钮，或运行命令“Kimi: 设置 API Key”。',
             });
             return;
         }
         const cfg = vscode.workspace.getConfiguration('kimiK3');
         const baseUrl = cfg.get('baseUrl') ?? DEFAULT_BASE_URL;
-        const model = modelOverride || cfg.get('model') || DEFAULT_MODEL;
-        const isK3 = model === 'kimi-k3' || model === 'kimi-k3[1m]';
-        const reasoningEffort = isK3
-            ? (effortOverride || cfg.get('reasoningEffort') || 'max')
+        const model = modelOverride || cfg.get('model') || models_1.DEFAULT_MODEL;
+        const reasoningEffort = (0, models_1.supportsReasoningEffort)(model)
+            ? (0, models_1.normalizeReasoningEffort)(effortOverride || cfg.get('reasoningEffort'))
             : undefined;
         const maxTokens = cfg.get('maxTokens') ?? 8192;
         const systemPrompt = cfg.get('systemPrompt') ?? '';
         const fullMessages = [
             { role: 'system', content: systemPrompt },
-            ...messages.map((m) => ({ role: m.role, content: m.content })),
+            ...messages,
         ];
         this.busy = true;
         this.abortController = new AbortController();
@@ -149,9 +173,9 @@ class ChatPanel {
                 if (error.status === 404) {
                     message +=
                         '\n\n提示：这是“模型未找到或没有权限”。请依次检查：' +
-                            '1) 账号是否已充值（K3 需充值解锁，赠券不可用）；' +
+                            '1) 当前账号是否有该模型的调用权限和可用额度；' +
                             '2) API Key 与接口地址是否属于同一平台（中国站用 api.moonshot.cn，国际站用 api.moonshot.ai）；' +
-                            '3) 高速版模型可能未对当前账号开放，可先切换标准版 kimi-k2.7-code 或 kimi-k2.6 试试。';
+                            '3) 高速版不可用时可切换 kimi-k3.1-pro；K2.7 / K2.6 已停止向新用户提供，老用户预计可用至 2026 年 12 月底。';
                 }
                 this.post({ type: 'error', message });
             }
@@ -180,13 +204,20 @@ class ChatPanel {
     }
     getHtml() {
         const nonce = crypto.randomBytes(16).toString('base64');
+        const cfg = vscode.workspace.getConfiguration('kimiK3');
+        // Escape '<' so a custom model setting cannot terminate the inline script.
+        const initialConfig = JSON.stringify({
+            models: models_1.MODELS,
+            model: cfg.get('model') || models_1.DEFAULT_MODEL,
+            effort: (0, models_1.normalizeReasoningEffort)(cfg.get('reasoningEffort')),
+        }).replace(/</g, '\\u003c');
         return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kimi K3</title>
+  <title>Kimi 助手</title>
   <style>
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
@@ -197,7 +228,7 @@ class ChatPanel {
       font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
     }
     header {
-      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px;
       background: var(--vscode-editorWidget-background);
       border-bottom: 1px solid var(--vscode-panel-border); flex-shrink: 0;
     }
@@ -206,7 +237,7 @@ class ChatPanel {
     select {
       background: var(--vscode-input-background); color: var(--vscode-input-foreground);
       border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px;
-      padding: 3px 6px; font-size: 12px; max-width: 150px;
+      padding: 3px 6px; font-size: 12px; max-width: 260px;
     }
     .spacer { flex: 1; }
     button {
@@ -293,13 +324,8 @@ class ChatPanel {
 </head>
 <body>
   <header>
-    <div class="brand">Kimi <b>K3</b></div>
-    <select id="model" title="模型">
-      <option value="kimi-k3">kimi-k3</option>
-      <option value="kimi-k2.7-code">kimi-k2.7-code</option>
-      <option value="kimi-k2.7-code-highspeed">kimi-k2.7-code-highspeed</option>
-      <option value="kimi-k2.6">kimi-k2.6</option>
-    </select>
+    <div class="brand"><b>Kimi</b> 助手</div>
+    <select id="model" title="模型" aria-label="模型"></select>
     <select id="effort" title="推理强度">
       <option value="max">推理：max</option>
       <option value="high">推理：high</option>
@@ -313,8 +339,8 @@ class ChatPanel {
   <main id="messages">
     <div id="welcome">
       <div class="big">🤖</div>
-      <div><b>Kimi K3 助手</b></div>
-      <div>在下方输入问题，或选中代码后右键选择“Kimi K3”操作。</div>
+      <div><b>Kimi 助手</b></div>
+      <div>在下方输入问题，或选中代码后右键选择“Kimi”操作。</div>
       <div>支持多轮对话、流式输出、思考过程与图片输入。</div>
     </div>
   </main>
@@ -322,7 +348,7 @@ class ChatPanel {
     <div id="attachments"></div>
     <textarea id="input" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
     <div class="toolbar">
-      <button id="attachBtn" title="添加图片（K3 支持视觉理解）">🖼 图片</button>
+      <button id="attachBtn" title="添加图片（K3.1 Pro / K3 支持视觉理解）">🖼 图片</button>
       <div class="spacer"></div>
       <button id="stopBtn" class="danger" hidden>停止</button>
       <button id="sendBtn" class="primary">发送</button>
@@ -333,6 +359,7 @@ class ChatPanel {
   <script nonce="${nonce}">
     (function () {
       var vscode = acquireVsCodeApi();
+      var config = ${initialConfig};
       var saved = vscode.getState() || {};
       var messages = Array.isArray(saved.messages) ? saved.messages : [];
       var streaming = false;
@@ -356,11 +383,33 @@ class ChatPanel {
       var attachmentsEl = document.getElementById('attachments');
       var fileInput = document.getElementById('fileInput');
 
-      if (saved.model) modelSel.value = saved.model;
-      if (saved.effort) effortSel.value = saved.effort;
+      config.models.forEach(function (model) {
+        var option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.label;
+        modelSel.appendChild(option);
+      });
+
+      function selectModel(value) {
+        // Preserve explicitly configured models and older saved selections.
+        if (!Array.from(modelSel.options).some(function (option) { return option.value === value; })) {
+          var option = document.createElement('option');
+          option.value = value;
+          option.textContent = value;
+          modelSel.appendChild(option);
+        }
+        modelSel.value = value;
+      }
+
+      selectModel(saved.model && (!saved.configModel || saved.configModel === config.model)
+        ? saved.model : config.model);
+      effortSel.value = saved.effort && (!saved.configEffort || saved.configEffort === config.effort)
+        ? saved.effort : config.effort;
+      if (!effortSel.value) effortSel.value = config.effort;
 
       function saveState() {
-        vscode.setState({ messages: messages, model: modelSel.value, effort: effortSel.value });
+        vscode.setState({ messages: messages, model: modelSel.value, effort: effortSel.value,
+          configModel: config.model, configEffort: config.effort });
       }
 
       function status(text, isError) {
@@ -458,7 +507,7 @@ class ChatPanel {
             var lang = nl === -1 ? '' : inner.slice(0, nl).trim();
             var code = nl === -1 ? inner : inner.slice(nl + 1);
             code = code.replace(/\`\`\`$/, '').replace(/\\n$/, '');
-            html += '<pre><code>' + (lang ? '<span class="lang">' + lang + '</span>\\n' : '') + code + '</code></pre>';
+            html += '<pre><code>' + (lang ? '<span class="lang">' + escapeHtml(lang) + '</span>\\n' : '') + escapeHtml(code) + '</code></pre>';
           } else {
             html += renderInline(renderBlocks(escapeHtml(part)));
           }
@@ -494,14 +543,14 @@ class ChatPanel {
             bubble.innerHTML = renderMarkdown(msg.content);
           }
         } else {
-          if (msg.reasoning) {
+          if (msg.reasoning_content || msg.reasoning) {
             var details = document.createElement('details');
             details.className = 'reasoning';
             var summary = document.createElement('summary');
             summary.textContent = '思考过程';
             var body = document.createElement('div');
             body.className = 'reasoning-body';
-            body.innerHTML = renderMarkdown(msg.reasoning);
+            body.innerHTML = renderMarkdown(msg.reasoning_content ?? msg.reasoning);
             details.appendChild(summary);
             details.appendChild(body);
             bubble.appendChild(details);
@@ -526,6 +575,7 @@ class ChatPanel {
 
       function renderAll() {
         messagesEl.innerHTML = '';
+        messagesEl.appendChild(welcomeEl);
         welcomeEl.style.display = messages.length ? 'none' : 'flex';
         messages.forEach(function (m) {
           messagesEl.appendChild(renderMessage(m));
@@ -589,6 +639,12 @@ class ChatPanel {
         stopBtn.hidden = !streaming;
         input.disabled = streaming;
         attachBtn.disabled = streaming;
+        modelSel.disabled = streaming;
+        var selectedModel = config.models.find(function (model) { return model.id === modelSel.value; });
+        effortSel.disabled = streaming || !(selectedModel && selectedModel.reasoningEffort
+          || modelSel.value === 'kimi-k3[1m]');
+        effortSel.title = effortSel.disabled && !streaming ? '该模型不支持调整推理强度' : '推理强度';
+        document.getElementById('newChat').disabled = streaming;
       }
 
       function finishAssistant(stopped) {
@@ -602,7 +658,7 @@ class ChatPanel {
           messages.push({
             role: 'assistant',
             content: contentBuffer,
-            reasoning: reasoningBuffer || undefined
+            reasoning_content: reasoningBuffer || undefined
           });
         }
         teardownAssistant();
@@ -651,7 +707,8 @@ class ChatPanel {
         updateBusyUI();
         status('等待响应…');
         var payload = history.map(function (m) {
-          return { role: m.role, content: m.content };
+          return { role: m.role, content: m.content,
+            reasoning_content: m.role === 'assistant' ? (m.reasoning_content ?? m.reasoning) : undefined };
         });
         vscode.postMessage({
           type: 'send',
@@ -696,6 +753,11 @@ class ChatPanel {
       }
 
       sendBtn.addEventListener('click', function () { doSend(); });
+      modelSel.addEventListener('change', function () {
+        updateBusyUI();
+        saveState();
+      });
+      effortSel.addEventListener('change', saveState);
       stopBtn.addEventListener('click', function () {
         vscode.postMessage({ type: 'stop' });
         status('正在停止…');
@@ -704,6 +766,7 @@ class ChatPanel {
       document.getElementById('newChat').addEventListener('click', function () {
         messages = [];
         imageQueue = [];
+        renderAttachments();
         saveState();
         renderAll();
         status('');
@@ -744,15 +807,13 @@ class ChatPanel {
         var msg = event.data;
         if (!msg || typeof msg !== 'object') return;
         if (msg.type === 'start') {
-          if (msg.replace) {
-            messages = msg.messages || [];
-            imageQueue = [];
-            saveState();
-            renderAll();
+          if (streaming) {
+            status('请先停止当前回复，再开始新任务', true);
+            return;
           }
-          beginAssistant();
-          updateBusyUI();
-          status('等待响应…');
+          imageQueue = [];
+          renderAttachments();
+          doSend(msg.messages || []);
         } else if (msg.type === 'delta') {
           if (!streaming) beginAssistant();
           if (msg.kind === 'reasoning') reasoningBuffer += msg.text;
@@ -770,7 +831,7 @@ class ChatPanel {
               messages.push({
                 role: 'assistant',
                 content: contentBuffer,
-                reasoning: reasoningBuffer || undefined
+                reasoning_content: reasoningBuffer || undefined
               });
             }
             teardownAssistant();
@@ -779,9 +840,25 @@ class ChatPanel {
             saveState();
           }
           showError(msg.message || '未知错误');
+        } else if (msg.type === 'config') {
+          if (msg.model) {
+            config.model = msg.model;
+            selectModel(msg.model);
+          }
+          if (msg.effort) {
+            config.effort = msg.effort;
+            effortSel.value = msg.effort;
+          }
+          updateBusyUI();
+          saveState();
         } else if (msg.type === 'clear') {
+          if (streaming) {
+            status('请先停止当前回复，再清空对话', true);
+            return;
+          }
           messages = [];
           imageQueue = [];
+          renderAttachments();
           saveState();
           renderAll();
           status('对话已清空');
@@ -790,6 +867,7 @@ class ChatPanel {
 
       renderAll();
       updateBusyUI();
+      vscode.postMessage({ type: 'ready' });
     })();
   </script>
 </body>

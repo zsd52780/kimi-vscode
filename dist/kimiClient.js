@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.KimiApiError = void 0;
 exports.streamChat = streamChat;
+const models_1 = require("./models");
 class KimiApiError extends Error {
     status;
     constructor(message, status) {
@@ -19,12 +20,23 @@ async function streamChat(config, messages, signal, events) {
     const baseUrl = config.baseUrl.replace(/\/+$/, '');
     const body = {
         model: config.model,
-        messages,
+        messages: messages.map((message) => {
+            const apiMessage = {
+                role: message.role,
+                content: message.content,
+            };
+            if (message.role === 'assistant') {
+                const reasoning = message.reasoning_content ?? message.reasoning;
+                if (reasoning !== undefined) {
+                    apiMessage.reasoning_content = reasoning;
+                }
+            }
+            return apiMessage;
+        }),
         stream: true,
         max_completion_tokens: config.maxTokens,
     };
-    if (config.reasoningEffort) {
-        // reasoning_effort 是 Kimi K3 的顶层参数；K2.7 Code / K2.6 系列不使用该字段
+    if (config.reasoningEffort && (0, models_1.supportsReasoningEffort)(config.model)) {
         body.reasoning_effort = config.reasoningEffort;
     }
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -37,52 +49,63 @@ async function streamChat(config, messages, signal, events) {
         signal,
     });
     if (!response.ok || !response.body) {
-        let detail = '';
+        const responseText = await response.text();
+        let detail = responseText;
         try {
-            const json = (await response.json());
+            const json = JSON.parse(responseText);
             detail = json.error?.message ?? JSON.stringify(json);
         }
         catch {
-            detail = await response.text();
+            // Keep the original body for non-JSON error responses.
         }
         throw new KimiApiError(`请求失败（HTTP ${response.status}）：${detail}`, response.status);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
+    const processLine = (rawLine) => {
+        const line = rawLine.trim();
+        if (!line.startsWith('data:')) {
+            return false;
+        }
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') {
+            return true;
+        }
+        let chunk;
+        try {
+            chunk = JSON.parse(data);
+        }
+        catch {
+            return false;
+        }
+        const delta = chunk.choices?.[0]?.delta;
+        if (!delta) {
+            return false;
+        }
+        if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
+            events.onReasoning?.(delta.reasoning_content);
+        }
+        if (typeof delta.content === 'string' && delta.content.length > 0) {
+            events.onContent?.(delta.content);
+        }
+        return false;
+    };
     while (true) {
         const { done, value } = await reader.read();
         if (done) {
+            buffer += decoder.decode();
+            if (buffer) {
+                processLine(buffer);
+            }
             break;
         }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() ?? '';
         for (const rawLine of lines) {
-            const line = rawLine.trim();
-            if (!line.startsWith('data:')) {
-                continue;
-            }
-            const data = line.slice(5).trim();
-            if (data === '[DONE]') {
+            if (processLine(rawLine)) {
                 return;
-            }
-            let chunk;
-            try {
-                chunk = JSON.parse(data);
-            }
-            catch {
-                continue;
-            }
-            const delta = chunk.choices?.[0]?.delta;
-            if (!delta) {
-                continue;
-            }
-            if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
-                events.onReasoning?.(delta.reasoning_content);
-            }
-            if (typeof delta.content === 'string' && delta.content.length > 0) {
-                events.onContent?.(delta.content);
             }
         }
     }

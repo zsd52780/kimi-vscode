@@ -1,3 +1,5 @@
+import { ReasoningEffort, supportsReasoningEffort } from './models';
+
 export interface ImageUrlPart {
   type: 'image_url';
   image_url: { url: string };
@@ -15,13 +17,14 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: MessageContent;
   reasoning?: string;
+  reasoning_content?: string;
 }
 
 export interface ChatConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
-  reasoningEffort?: 'low' | 'high' | 'max';
+  reasoningEffort?: ReasoningEffort;
   maxTokens: number;
 }
 
@@ -53,12 +56,23 @@ export async function streamChat(
   const baseUrl = config.baseUrl.replace(/\/+$/, '');
   const body: Record<string, unknown> = {
     model: config.model,
-    messages,
+    messages: messages.map((message) => {
+      const apiMessage: Record<string, unknown> = {
+        role: message.role,
+        content: message.content,
+      };
+      if (message.role === 'assistant') {
+        const reasoning = message.reasoning_content ?? message.reasoning;
+        if (reasoning !== undefined) {
+          apiMessage.reasoning_content = reasoning;
+        }
+      }
+      return apiMessage;
+    }),
     stream: true,
     max_completion_tokens: config.maxTokens,
   };
-  if (config.reasoningEffort) {
-    // reasoning_effort 是 Kimi K3 的顶层参数；K2.7 Code / K2.6 系列不使用该字段
+  if (config.reasoningEffort && supportsReasoningEffort(config.model)) {
     body.reasoning_effort = config.reasoningEffort;
   }
 
@@ -73,12 +87,13 @@ export async function streamChat(
   });
 
   if (!response.ok || !response.body) {
-    let detail = '';
+    const responseText = await response.text();
+    let detail = responseText;
     try {
-      const json = (await response.json()) as { error?: { message?: string } };
+      const json = JSON.parse(responseText) as { error?: { message?: string } };
       detail = json.error?.message ?? JSON.stringify(json);
     } catch {
-      detail = await response.text();
+      // Keep the original body for non-JSON error responses.
     }
     throw new KimiApiError(`请求失败（HTTP ${response.status}）：${detail}`, response.status);
   }
@@ -87,9 +102,45 @@ export async function streamChat(
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
 
+  const processLine = (rawLine: string): boolean => {
+    const line = rawLine.trim();
+    if (!line.startsWith('data:')) {
+      return false;
+    }
+    const data = line.slice(5).trim();
+    if (data === '[DONE]') {
+      return true;
+    }
+    let chunk: {
+      choices?: Array<{
+        delta?: { reasoning_content?: string; content?: string };
+      }>;
+    };
+    try {
+      chunk = JSON.parse(data) as typeof chunk;
+    } catch {
+      return false;
+    }
+    const delta = chunk.choices?.[0]?.delta;
+    if (!delta) {
+      return false;
+    }
+    if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
+      events.onReasoning?.(delta.reasoning_content);
+    }
+    if (typeof delta.content === 'string' && delta.content.length > 0) {
+      events.onContent?.(delta.content);
+    }
+    return false;
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) {
+      buffer += decoder.decode();
+      if (buffer) {
+        processLine(buffer);
+      }
       break;
     }
     buffer += decoder.decode(value, { stream: true });
@@ -97,33 +148,8 @@ export async function streamChat(
     buffer = lines.pop() ?? '';
 
     for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line.startsWith('data:')) {
-        continue;
-      }
-      const data = line.slice(5).trim();
-      if (data === '[DONE]') {
+      if (processLine(rawLine)) {
         return;
-      }
-      let chunk: {
-        choices?: Array<{
-          delta?: { reasoning_content?: string; content?: string };
-        }>;
-      };
-      try {
-        chunk = JSON.parse(data) as typeof chunk;
-      } catch {
-        continue;
-      }
-      const delta = chunk.choices?.[0]?.delta;
-      if (!delta) {
-        continue;
-      }
-      if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
-        events.onReasoning?.(delta.reasoning_content);
-      }
-      if (typeof delta.content === 'string' && delta.content.length > 0) {
-        events.onContent?.(delta.content);
       }
     }
   }

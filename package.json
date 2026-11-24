@@ -1,8 +1,8 @@
 {
   "name": "kimi-k3-assistant",
-  "displayName": "Kimi K3 助手",
-  "description": "在 VS Code 中通过官方 API 使用 Kimi K3：聊天、解释/重构/审查代码、生成测试，支持流式输出、思考过程和图片输入。",
-  "version": "0.1.0",
+  "displayName": "Kimi 助手",
+  "description": "在 VS Code 中通过官方 API 使用 Kimi K3.1 Pro / Highspeed / K3：聊天、解释/重构/审查代码、生成测试，支持流式输出、思考过程和图片输入。",
+  "version": "0.2.0",
   "publisher": "kimi-k3-assistant",
   "license": "MIT",
   "engines": {
@@ -19,35 +19,35 @@
     "commands": [
       {
         "command": "kimiK3.openChat",
-        "title": "Kimi K3: 打开聊天面板"
+        "title": "Kimi: 打开聊天面板"
       },
       {
         "command": "kimiK3.explainSelection",
-        "title": "Kimi K3: 解释选中代码"
+        "title": "Kimi: 解释选中代码"
       },
       {
         "command": "kimiK3.reviewSelection",
-        "title": "Kimi K3: 审查选中代码"
+        "title": "Kimi: 审查选中代码"
       },
       {
         "command": "kimiK3.refactorSelection",
-        "title": "Kimi K3: 重构选中代码"
+        "title": "Kimi: 重构选中代码"
       },
       {
         "command": "kimiK3.generateTests",
-        "title": "Kimi K3: 为选中代码生成测试"
+        "title": "Kimi: 为选中代码生成测试"
       },
       {
         "command": "kimiK3.askAboutFile",
-        "title": "Kimi K3: 询问当前文件"
+        "title": "Kimi: 询问当前文件"
       },
       {
         "command": "kimiK3.setApiKey",
-        "title": "Kimi K3: 设置 API Key"
+        "title": "Kimi: 设置 API Key"
       },
       {
         "command": "kimiK3.clearConversation",
-        "title": "Kimi K3: 清空当前对话"
+        "title": "Kimi: 清空当前对话"
       }
     ],
     "menus": {
@@ -82,7 +82,7 @@
       ]
     },
     "configuration": {
-      "title": "Kimi K3",
+      "title": "Kimi",
       "properties": {
         "kimiK3.baseUrl": {
           "type": "string",
@@ -91,14 +91,24 @@
         },
         "kimiK3.model": {
           "type": "string",
-          "default": "kimi-k3",
+          "default": "kimi-k3.1-pro",
           "enum": [
+            "kimi-k3.1-pro",
+            "kimi-k3.1-pro-highspeed",
             "kimi-k3",
             "kimi-k2.7-code",
             "kimi-k2.7-code-highspeed",
             "kimi-k2.6"
           ],
-          "description": "默认使用的模型，聊天面板内也可以临时切换。"
+          "description": "默认使用的模型，聊天面板内也可以临时切换。",
+          "enumDescriptions": [
+            "Kimi K3.1 Pro（推荐），支持图片与推理强度。",
+            "Kimi K3.1 Pro 高速版，支持图片与推理强度。",
+            "Kimi K3，支持图片与推理强度。",
+            "旧模型，仅向老用户提供，预计于 2026 年 12 月底下线。",
+            "旧模型高速版，仅向老用户提供，预计于 2026 年 12 月底下线。",
+            "旧模型，仅向老用户提供，预计于 2026 年 12 月底下线。"
+          ]
         },
         "kimiK3.reasoningEffort": {
           "type": "string",
@@ -108,18 +118,18 @@
             "max"
           ],
           "default": "max",
-          "description": "Kimi K3 的推理强度（该模型始终开启思考模式）。"
+          "description": "Kimi K3.1 Pro（含高速版）和 K3 的推理强度；这些模型始终开启思考模式。"
         },
         "kimiK3.maxTokens": {
-          "type": "number",
+          "type": "integer",
           "default": 8192,
           "minimum": 1,
           "maximum": 1048576,
-          "description": "单次回复的最大输出 token 数（K3 上限为 1048576）。"
+          "description": "单次回复的最大输出 token 数（包含思考内容；K3.1 Pro / K3 上限为 1048576，实际受剩余上下文限制）。"
         },
         "kimiK3.systemPrompt": {
           "type": "string",
-          "default": "你是 Kimi K3，一个集成在 VS Code 中的编程助手。请用中文回答（除非用户使用其他语言），回答代码问题时给出可直接运行的完整示例，并尽量简洁、准确。",
+          "default": "你是 Kimi，一个集成在 VS Code 中的编程助手。请用中文回答（除非用户使用其他语言），回答代码问题时给出可直接运行的完整示例，并尽量简洁、准确。",
           "description": "发送给模型的系统提示词。"
         }
       }
@@ -128,13 +138,18 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile",
-    "package": "vsce package --no-dependencies"
+    "vscode:prepublish": "tsc -p ./",
+    "package": "vsce package --no-dependencies",
+    "test": "tsc -p ./ && node --test test/*.test.cjs"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.2.1",
     "typescript": "^5.4.5"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zsd52780/kimi-vscode.git"
   }
 }
